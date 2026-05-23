@@ -69,11 +69,7 @@ class GameServer:
         self.sock.bind(('0.0.0.0', self.port))
 
         while self.clientesAtendidos < 2:
-            data, addr = self.sock.getbuffer() \
-                if hasattr(self.sock, 'getbuffer') \
-                else self.sock.recvfrom(1024)
-            if isinstance(data, tuple):
-                data, addr = data
+            data, addr = self.sock.recvfrom(1024)
 
             if len(data) < 4:
                 continue
@@ -85,32 +81,31 @@ class GameServer:
 
             ctx = self._getOrCreateSession(addr)
 
-            match tipo:
-                case Packet.TIPO_START:
-                    resPayload = "?" * self.na
-                    ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax, resPayload)
-                    self.sock.sendto(ctx.lastRes, addr)
+            if tipo == Packet.TIPO_START:
+                resPayload = "?" * self.na
+                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax, resPayload)
+                self.sock.sendto(ctx.lastRes, addr)
 
-                case Packet.TIPO_TRY:
-                    feedback = self._processTry(data, seqnum, ctx)
-                    if feedback is None:
-                        errPkt = Packet.build(Packet.TIPO_ERROR, 1 if seqnum <= self.ntMax else 0, "")
-                        self.sock.sendto(errPkt, addr)
-                        continue
-
-                    ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax - seqnum, feedback)
-                    self.sock.sendto(ctx.lastRes, addr)
-
-                case Packet.TIPO_GIVE_UP:
-                    ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, 65535, self.senhaReal)
-                    self.sock.sendto(ctx.lastRes, addr)
-                    if not ctx.finished:
-                        ctx.finished = True
-                        self.clientesAtendidos += 1
-
-                case Packet.TIPO_RESPONSE | Packet.TIPO_ERROR:
-                    errPkt = Packet.build(Packet.TIPO_ERROR, 0, "")
+            elif tipo == Packet.TIPO_TRY:
+                feedback = self._processTry(data, seqnum, ctx)
+                if feedback is None:
+                    errPkt = Packet.build(Packet.TIPO_ERROR, 1 if seqnum <= self.ntMax else 0, "")
                     self.sock.sendto(errPkt, addr)
+                    continue
+
+                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax - seqnum, feedback)
+                self.sock.sendto(ctx.lastRes, addr)
+
+            elif tipo == Packet.TIPO_GIVE_UP:
+                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, 65535, self.senhaReal)
+                self.sock.sendto(ctx.lastRes, addr)
+                if not ctx.finished:
+                    ctx.finished = True
+                    self.clientesAtendidos += 1
+
+            elif tipo in (Packet.TIPO_RESPONSE, Packet.TIPO_ERROR):
+                errPkt = Packet.build(Packet.TIPO_ERROR, 0, "")
+                self.sock.sendto(errPkt, addr)
 
 def main():
     if len(sys.argv) != 4:
