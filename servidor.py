@@ -3,21 +3,20 @@
 import socket
 import sys
 import random
-from typing import Union, Optional, Tuple
 from protocolo import Packet
 
 class ServidorJogo:
-    _TIMEOUT = 0.1
-    _MAX_CLIENTES = 2
-    _BYTE_OFFSET_ZERO = 48
-    _BYTE_OFFSET_NOVE = 57
-    _ERRO_SEQ = 0
-    _ERRO_DIGITO_REPETIDO = 1
+    TIMEOUT = 0.1
+    MAX_CLIENTES = 2
+    BYTE_OFFSET_ZERO = 48
+    BYTE_OFFSET_NOVE = 57
+    ERRO_SEQ = 0
+    ERRO_DIGITO_REPETIDO = 1
 
-    def __init__(self, porta: int, senha_entrada: str, max_tentativas: int):
+    def __init__(self, porta, senha_entrada, max_tentativas):
         self.porta = porta
         self.max_tentativas = max_tentativas
-        self.senha_real = self._gerar_senha_real(senha_entrada)
+        self.senha_real = self.gerar_senha_real(senha_entrada)
         self.num_digitos = len(self.senha_real)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', porta))
@@ -25,7 +24,7 @@ class ServidorJogo:
         self.clientes_atendidos = 0
 
     @staticmethod
-    def _gerar_senha_real(senha_entrada: str) -> str:
+    def gerar_senha_real(senha_entrada):
         if (senha_entrada.isdigit() and
                 all(c == '0' for c in senha_entrada) and
                 4 <= len(senha_entrada) <= 8):
@@ -35,14 +34,14 @@ class ServidorJogo:
             return ''.join(digitos[:comprimento])
         return senha_entrada
 
-    def _validar_digitos(self, payload: bytes) -> Tuple[bool, Optional[list], Optional[str]]:
+    def validar_digitos(self, payload):
         if len(payload) < self.num_digitos:
             return False, None, 'TAMANHO_INVALIDO'
 
         digitos = list(payload[:self.num_digitos])
 
         for d in digitos:
-            if not (self._BYTE_OFFSET_ZERO <= d <= self._BYTE_OFFSET_NOVE):
+            if not (self.BYTE_OFFSET_ZERO <= d <= self.BYTE_OFFSET_NOVE):
                 return False, None, 'DIGITO_INVALIDO'
 
         if len(set(digitos)) != self.num_digitos:
@@ -50,7 +49,7 @@ class ServidorJogo:
 
         return True, digitos, None
 
-    def _calcular_feedback(self, palpite: str) -> str:
+    def calcular_feedback(self, palpite):
         feedback = []
         for i in range(self.num_digitos):
             if palpite[i] == self.senha_real[i]:
@@ -61,29 +60,37 @@ class ServidorJogo:
                 feedback.append('-')
         return ''.join(feedback)
 
-    def _processar_tentativa(self, payload: bytes, num_seq: int, endereco) -> Tuple[Optional[str], Union[str, int]]:
+    def processar_tentativa(self, payload, num_seq, endereco):
         estado = self.clientes[endereco]
-        seq_esperado = estado['tentativas'] + 1
 
+        if num_seq == estado['ultimo_seq'] and estado['ultimo_feedback'] is not None:
+            return estado['ultimo_feedback'], estado['ultimo_restantes']
+
+        seq_esperado = estado['tentativas'] + 1
         if num_seq != seq_esperado:
             return None, 'SEQ_INVALIDA'
 
-        valido, digitos, erro = self._validar_digitos(payload)
+        valido, digitos, erro = self.validar_digitos(payload)
         if not valido:
             return None, erro
 
         palpite = ''.join(chr(d) for d in digitos)
-        feedback = self._calcular_feedback(palpite)
+        feedback = self.calcular_feedback(palpite)
 
         estado['tentativas'] = num_seq
+        estado['ultimo_seq'] = num_seq
         tentativas_restantes = self.max_tentativas - num_seq
+
+        estado['ultimo_feedback'] = feedback
+        estado['ultimo_restantes'] = tentativas_restantes
 
         return feedback, tentativas_restantes
 
-    def _criar_payload(self, conteudo: str, tamanho: int = 8) -> bytes:
+    @staticmethod
+    def criar_payload(conteudo, tamanho):
         return conteudo.ljust(tamanho, ' ').encode('ascii')
 
-    def _enviar_resposta_hel(self, endereco):
+    def enviar_resposta_hel(self, endereco):
         payload = bytearray(8)
         for i in range(self.num_digitos):
             payload[i] = ord('?')
@@ -94,11 +101,13 @@ class ServidorJogo:
         self.clientes[endereco] = {
             'ultimo_seq': 0,
             'tentativas': 0,
-            'aguardando_hel': False
+            'ultimo_feedback': None,
+            'ultimo_restantes': None,
+            'finalizado': False
         }
 
-    def _enviar_resposta_try(self, endereco, feedback: str, tentativas_restantes: int):
-        payload = self._criar_payload(feedback)
+    def enviar_resposta_try(self, endereco, feedback, tentativas_restantes):
+        payload = self.criar_payload(feedback, self.num_digitos)
         pacote = Packet.build(Packet.TIPO_RES, tentativas_restantes, payload)
         self.socket.sendto(pacote, endereco)
 
@@ -106,47 +115,55 @@ class ServidorJogo:
             self.clientes[endereco]['finalizado'] = True
             self.clientes_atendidos += 1
 
-    def _enviar_resposta_bye(self, endereco):
-        payload = self._criar_payload(self.senha_real)
-        pacote = Packet.build(Packet.TIPO_RES, 65535, payload)
+    def enviar_resposta_bye(self, endereco):
+        payload = self.criar_payload(self.senha_real, self.num_digitos)
+        pacote = Packet.build(Packet.TIPO_RES, -1, payload)
         self.socket.sendto(pacote, endereco)
 
         if not self.clientes[endereco].get('finalizado', False):
             self.clientes[endereco]['finalizado'] = True
             self.clientes_atendidos += 1
 
-    def _enviar_erro(self, endereco, seq: int):
+    def enviar_erro(self, endereco, seq):
         pacote = Packet.build(Packet.TIPO_ERR, seq, b'')
         self.socket.sendto(pacote, endereco)
 
-    def _processar_cliente_novo(self, tipo: int, num_seq: int, endereco):
+    def processar_cliente_novo(self, tipo: int, num_seq: int, endereco):
         if tipo == Packet.TIPO_HEL and num_seq == 0:
-            self._enviar_resposta_hel(endereco)
+            self.enviar_resposta_hel(endereco)
         else:
-            self._enviar_erro(endereco, 0)
+            self.enviar_erro(endereco, 0)
 
-    def _processar_comando_try(self, payload: bytes, num_seq: int, endereco, estado: dict):
-        if estado['tentativas'] >= self.max_tentativas:
-            self._enviar_erro(endereco, 0)
+    def processar_comando_try(self, payload, num_seq, endereco, estado):
+        if num_seq == estado['ultimo_seq'] and estado['ultimo_feedback'] is not None:
+            self.enviar_resposta_try(endereco, estado['ultimo_feedback'], estado['ultimo_restantes'])
             return
 
-        resultado = self._processar_tentativa(payload, num_seq, endereco)
+        if estado['tentativas'] >= self.max_tentativas:
+            self.enviar_erro(endereco, 0)
+            return
+
+        resultado = self.processar_tentativa(payload, num_seq, endereco)
 
         if resultado[0] is None:
-            codigo_erro = self._ERRO_DIGITO_REPETIDO if resultado[1] == 'DIGITO_REPETIDO' else 0
-            self._enviar_erro(endereco, codigo_erro)
+            codigo_erro = self.ERRO_DIGITO_REPETIDO if resultado[1] == 'DIGITO_REPETIDO' else 0
+            self.enviar_erro(endereco, codigo_erro)
         else:
             feedback, restantes = resultado
-            self._enviar_resposta_try(endereco, feedback, restantes)
+            self.enviar_resposta_try(endereco, feedback, restantes)
 
-    def _processar_comando_bye(self, num_seq: int, endereco, estado: dict):
+    def processar_comando_bye(self, num_seq, endereco, estado):
+        if estado['finalizado']:
+            self.enviar_resposta_bye(endereco)
+            return
+
         seq_esperado = estado['tentativas']
         if num_seq == seq_esperado:
-            self._enviar_resposta_bye(endereco)
+            self.enviar_resposta_bye(endereco)
         else:
-            self._enviar_erro(endereco, 0)
+            self.enviar_erro(endereco, 0)
 
-    def _processar_pacote(self, dados: bytes, endereco):
+    def processar_pacote(self, dados, endereco):
         if not Packet.validar_checksum(dados):
             return
 
@@ -154,24 +171,24 @@ class ServidorJogo:
         payload = dados[4:] if len(dados) > 4 else b''
 
         if endereco not in self.clientes:
-            self._processar_cliente_novo(tipo, num_seq, endereco)
+            self.processar_cliente_novo(tipo, num_seq, endereco)
             return
 
         estado = self.clientes[endereco]
 
         if tipo == Packet.TIPO_TRY:
-            self._processar_comando_try(payload, num_seq, endereco, estado)
+            self.processar_comando_try(payload, num_seq, endereco, estado)
         elif tipo == Packet.TIPO_BYE:
-            self._processar_comando_bye(num_seq, endereco, estado)
+            self.processar_comando_bye(num_seq, endereco, estado)
         elif tipo == Packet.TIPO_HEL:
-            self._enviar_resposta_hel(endereco)
+            self.enviar_resposta_hel(endereco)
         else:
-            self._enviar_erro(endereco, 0)
+            self.enviar_erro(endereco, 0)
 
     def iniciar(self):
-        self.socket.settimeout(self._TIMEOUT)
+        self.socket.settimeout(self.TIMEOUT)
 
-        while self.clientes_atendidos < self._MAX_CLIENTES:
+        while self.clientes_atendidos < self.MAX_CLIENTES:
             try:
                 dados, endereco = self.socket.recvfrom(1024)
             except socket.timeout:
@@ -180,7 +197,7 @@ class ServidorJogo:
             if len(dados) < 4:
                 continue
 
-            self._processar_pacote(dados, endereco)
+            self.processar_pacote(dados, endereco)
 
 def main():
     if len(sys.argv) != 4:

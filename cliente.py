@@ -5,9 +5,9 @@ import sys
 from protocolo import Packet
 
 class ClienteJogo:
-    _TAMANHO_PAYLOAD = 8
+    TAMANHO_PAYLOAD = 8
 
-    def __init__(self, host: str, porta: int):
+    def __init__(self, host, porta):
         self.tentativas_feitas = None
         self.max_tentativas = None
         self.num_digitos = None
@@ -19,7 +19,7 @@ class ClienteJogo:
         self.ultimo_tipo = None
         self.ultimo_seq = None
 
-    def _enviar_e_esperar(self, tipo: int, num_seq: int, payload: bytes = b'') -> tuple:
+    def enviar_e_esperar(self, tipo, num_seq, payload):
         pacote = Packet.build(tipo, num_seq, payload)
 
         for _ in range(Packet.MAX_TENTATIVAS_ENVIO):
@@ -39,11 +39,11 @@ class ClienteJogo:
             except socket.timeout:
                 continue
 
-        print("SEM_RESPOSTA")
+        print("NO RES")
         sys.exit(0)
 
     def iniciar(self):
-        tipo_resp, seq_resp, payload = self._enviar_e_esperar(Packet.TIPO_HEL, 0)
+        tipo_resp, seq_resp, payload = self.enviar_e_esperar(Packet.TIPO_HEL, 0)
 
         if tipo_resp != Packet.TIPO_RES:
             print("ERRO")
@@ -61,7 +61,7 @@ class ClienteJogo:
 
         return na, nt
 
-    def _processar_palpite(self, linha: str) -> bool:
+    def processar_palpite(self, linha):
         palpite = linha.strip()
         if not palpite:
             return False
@@ -73,10 +73,10 @@ class ClienteJogo:
             return False
 
         payload = palpite.encode('ascii')
-        if len(payload) < self._TAMANHO_PAYLOAD:
-            payload = payload.ljust(self._TAMANHO_PAYLOAD, b' ')
+        if len(payload) < self.TAMANHO_PAYLOAD:
+            payload = payload.ljust(self.TAMANHO_PAYLOAD, b' ')
 
-        tipo_resp, seq_resp, payload_resp = self._enviar_e_esperar(
+        tipo_resp, seq_resp, payload_resp = self.enviar_e_esperar(
             Packet.TIPO_TRY, self.num_tentativa, payload
         )
 
@@ -87,7 +87,7 @@ class ClienteJogo:
             self.tentativas_feitas += 1
 
             if feedback == '*' * self.num_digitos:
-                self._enviar_bye()
+                self.enviar_bye()
                 return True
 
         elif tipo_resp == Packet.TIPO_ERR:
@@ -102,16 +102,16 @@ class ClienteJogo:
     def jogar(self):
         try:
             for linha in sys.stdin:
-                if self._processar_palpite(linha):
+                if self.processar_palpite(linha):
                     return
         except EOFError:
             pass
 
-        self._enviar_bye()
+        self.enviar_bye()
 
-    def _enviar_bye(self):
+    def enviar_bye(self):
         seq = self.num_tentativa - 1
-        tipo_resp, seq_resp, payload = self._enviar_e_esperar(Packet.TIPO_BYE, seq)
+        tipo_resp, seq_resp, payload = self.enviar_e_esperar(Packet.TIPO_BYE, seq)
 
         if tipo_resp == Packet.TIPO_RES:
             senha = payload.decode('ascii').rstrip()
