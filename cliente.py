@@ -2,95 +2,146 @@
 
 import socket
 import sys
+import time
 from protocolo import Packet
 
-class ClienteJogo:
-    MAX_TENTATIVAS = 3
-    DURACAO_TIMEOUT = 1.0
 
+class ClienteJogo:
     def __init__(self, host: str, porta: int):
         self.endereco = (host, porta)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.num_tentativa = 1
+        self.socket.settimeout(Packet.TIMEOUT_SEGUNDOS)
+        self.num_tentativa = 1  # Próximo TRY a ser enviado
+        self.ultima_mensagem = None
+        self.ultimo_tipo = None
+        self.ultimo_seq = None
 
-    def _validar_checksum(self, dados: bytes, checksum_recebido: int) -> bool:
-        copia_dados = bytearray(dados)
-        copia_dados[1] = 0
-        return Packet.calcular_checksum(copia_dados) == checksum_recebido
+    def _enviar_e_esperar(self, tipo: int, num_seq: int, payload: bytes = b'') -> tuple:
+        """Envia mensagem com retransmissão e aguarda resposta"""
+        pacote = Packet.build(tipo, num_seq, payload)
 
-    # Envia um pacote UDP e aguarda a resposta com tratamento de timeout e retransmissao
-    def enviar_e_aguardar(self, pacote: bytes):
-        for _ in range(self.MAX_TENTATIVAS):
+        for tentativa in range(Packet.MAX_TENTATIVAS_ENVIO):
             self.socket.sendto(pacote, self.endereco)
+
             try:
-                self.socket.settimeout(self.DURACAO_TIMEOUT)
                 dados, _ = self.socket.recvfrom(1024)
 
                 if len(dados) < 4:
                     continue
 
-                tipo, checksum_rec, seq = Packet.unpack_header(dados)
+                if not Packet.validar_checksum(dados):
+                    continue
 
-                if self._validar_checksum(dados, checksum_rec):
-                    payload = dados[4:].decode('ascii').strip()
-                    return tipo, seq, payload
+                tipo_resp, _, seq_resp = Packet.unpack_header(dados)
+                payload_resp = dados[4:] if len(dados) > 4 else b''
+
+                return tipo_resp, seq_resp, payload_resp
+
             except socket.timeout:
                 continue
 
+        # Esgotou tentativas
         print("SEM_RESPOSTA")
         sys.exit(0)
 
-    # Inicia a partida enviando o pacote de inicializacao (START)
-    def iniciar_jogo(self):
-        pacote_inicio = Packet.build(Packet.TIPO_START, 0, "")
-        tipo, seq, payload = self.enviar_e_aguardar(pacote_inicio)
+    def iniciar(self):
+        """Envia HEL e processa resposta inicial"""
+        tipo_resp, seq_resp, payload = self._enviar_e_esperar(Packet.TIPO_HEL, 0)
 
-        num_digitos = payload.count('?')
-        print(f"ND={num_digitos}, NT={seq}")
+        if tipo_resp != Packet.TIPO_RES:
+            print("ERRO")
+            sys.exit(1)
 
-    # Executa o loop principal do jogo, lendo os palpites do usuario via terminal
+        # Extrai NA (conta interrogações) e NT (seq_resp)
+        payload_str = payload.decode('ascii').rstrip()
+        na = payload_str.count('?')
+        nt = seq_resp
+
+        print(f"NA={na}, NT={nt}")
+
+        self.num_digitos = na
+        self.max_tentativas = nt
+        self.tentativas_feitas = 0
+
+        return na, nt
+
     def jogar(self):
+        """Loop principal do jogo"""
         try:
             for linha in sys.stdin:
                 palpite = linha.strip()
                 if not palpite:
                     continue
 
-                pacote_tentativa = Packet.build(Packet.TIPO_TRY, self.num_tentativa, palpite)
-                tipo, seq, payload = self.enviar_e_aguardar(pacote_tentativa)
+                # Verifica comando especial BYE (não faz parte da especificação, mas útil)
+                if palpite.upper() == 'BYE':
+                    break
 
-                if tipo == Packet.TIPO_RESPONSE:
-                    print(f"{self.num_tentativa}({seq}) {payload}")
+                # Valida tamanho do palpite
+                if len(palpite) != self.num_digitos:
+                    # Envia erro e continua
+                    continue
+
+                # Converte para bytes
+                payload = palpite.encode('ascii')
+                if len(payload) < 8:
+                    payload = payload.ljust(8, b' ')
+
+                tipo_resp, seq_resp, payload_resp = self._enviar_e_esperar(
+                    Packet.TIPO_TRY, self.num_tentativa, payload
+                )
+
+                if tipo_resp == Packet.TIPO_RES:
+                    feedback = payload_resp.decode('ascii').rstrip()
+                    print(f"{self.num_tentativa}({seq_resp}) {feedback}")
                     self.num_tentativa += 1
+                    self.tentativas_feitas += 1
 
-                elif tipo == Packet.TIPO_ERROR:
-                    if seq > 0:
-                        print(f"REPETIR {seq}")
+                    # Verifica se acertou
+                    if feedback == '*' * self.num_digitos:
+                        # Acertou! Envia BYE
+                        self._enviar_bye()
+                        return
+
+                elif tipo_resp == Packet.TIPO_ERR:
+                    if seq_resp > 0:
+                        print(f"RETRY {seq_resp}")
+                        # Não incrementa num_tentativa em caso de RETRY
                     else:
                         print("ERRO")
                         sys.exit(0)
+
         except EOFError:
             pass
 
-    # Envia uma sinalizacao de desistencia para o servidor e exibe a resposta (senha correta)
-    def desistir(self):
-        pacote_desistencia = Packet.build(Packet.TIPO_GIVE_UP, self.num_tentativa - 1, "")
-        tipo, seq, payload = self.enviar_e_aguardar(pacote_desistencia)
+        # Fim da entrada: envia BYE
+        self._enviar_bye()
 
-        if tipo == Packet.TIPO_RESPONSE:
-            print(f"Senha={payload}")
+    def _enviar_bye(self):
+        """Envia mensagem BYE e processa resposta"""
+        seq = self.num_tentativa - 1  # Último TRY enviado
+        tipo_resp, seq_resp, payload = self._enviar_e_esperar(Packet.TIPO_BYE, seq)
+
+        if tipo_resp == Packet.TIPO_RES:
+            senha = payload.decode('ascii').rstrip()
+            print(f"Senha={senha}")
+        else:
+            print("ERRO")
+            sys.exit(1)
+
 
 def main():
     if len(sys.argv) != 3:
+        print("Uso: python3 cliente.py <host> <porta>")
         sys.exit(1)
 
     host = sys.argv[1]
     porta = int(sys.argv[2])
 
     cliente = ClienteJogo(host, porta)
-    cliente.iniciar_jogo()
+    cliente.iniciar()
     cliente.jogar()
-    cliente.desistir()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
