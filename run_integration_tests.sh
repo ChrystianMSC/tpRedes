@@ -1,1 +1,0 @@
-cd "$(dirname "$0")/.." && python3 -m pytest helpers/test_integration.py -v

@@ -8,5 +8,3 @@ run_cli:
 
 clean:
 	rm -rf __pycache__ *.pyc
-
-.PHONY: run_serv run_clmake run_cli arg1=grande.grad.dcc.ufmg.br arg2=5555 clean
