@@ -6,6 +6,9 @@ from protocolo import Packet
 
 class ClienteJogo:
     def __init__(self, host: str, porta: int):
+        self.tentativas_feitas = None
+        self.max_tentativas = None
+        self.num_digitos = None
         self.endereco = (host, porta)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.settimeout(Packet.TIMEOUT_SEGUNDOS)

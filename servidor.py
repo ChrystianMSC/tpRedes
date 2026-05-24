@@ -5,7 +5,6 @@ import sys
 import random
 from protocolo import Packet
 
-
 class ServidorJogo:
     def __init__(self, porta: int, senha_entrada: str, max_tentativas: int):
         self.porta = porta
@@ -17,7 +16,8 @@ class ServidorJogo:
         self.clientes = {}
         self.clientes_atendidos = 0
 
-    def _gerar_senha_real(self, senha_entrada: str) -> str:
+    @staticmethod
+    def _gerar_senha_real(senha_entrada: str) -> str:
         if (senha_entrada.isdigit() and
                 all(c == '0' for c in senha_entrada) and
                 4 <= len(senha_entrada) <= 8):
@@ -92,7 +92,7 @@ class ServidorJogo:
             self.clientes[endereco]['finalizado'] = True
             self.clientes_atendidos += 1
 
-    def _enviar_erro(self, endereco, seq: int, motivo: str):
+    def _enviar_erro(self, endereco, seq: int):
         pacote = Packet.build(Packet.TIPO_ERR, seq, b'')
         self.socket.sendto(pacote, endereco)
 
@@ -118,22 +118,22 @@ class ServidorJogo:
                 if tipo == Packet.TIPO_HEL and num_seq == 0:
                     self._enviar_resposta_hel(endereco)
                 else:
-                    self._enviar_erro(endereco, 0, 'CLIENTE_DESCONHECIDO')
+                    self._enviar_erro(endereco, 0)
                 continue
 
             estado = self.clientes[endereco]
 
             if tipo == Packet.TIPO_TRY:
                 if estado['tentativas'] >= self.max_tentativas:
-                    self._enviar_erro(endereco, 0, 'TENTATIVAS_EXCEDIDAS')
+                    self._enviar_erro(endereco, 0)
                     continue
 
                 resultado = self._processar_tentativa(payload, num_seq, endereco)
                 if resultado[0] is None:
                     if resultado[1] == 'DIGITO_REPETIDO':
-                        self._enviar_erro(endereco, 1, 'DIGITO_REPETIDO')
+                        self._enviar_erro(endereco, 1)
                     else:
-                        self._enviar_erro(endereco, 0, resultado[1])
+                        self._enviar_erro(endereco, 0)
                 else:
                     feedback, restantes = resultado
                     self._enviar_resposta_try(endereco, feedback, restantes)
@@ -143,13 +143,13 @@ class ServidorJogo:
                 if num_seq == seq_esperado:
                     self._enviar_resposta_bye(endereco)
                 else:
-                    self._enviar_erro(endereco, 0, 'SEQ_INVALIDA_BYE')
+                    self._enviar_erro(endereco, 0)
 
             elif tipo == Packet.TIPO_HEL:
                 self._enviar_resposta_hel(endereco)
 
             else:
-                self._enviar_erro(endereco, 0, 'TIPO_INVALIDO')
+                self._enviar_erro(endereco, 0)
 
 def main():
     if len(sys.argv) != 4:
