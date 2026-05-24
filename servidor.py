@@ -5,118 +5,133 @@ import sys
 import random
 from protocolo import Packet
 
-class ClientSession:
+class ClienteSessao:
     def __init__(self):
-        self.tryCount = 0
-        self.lastRes = None
-        self.lastSeq = -1
-        self.finished = False
+        self.tentativas = 0
+        self.ultima_resposta = None
+        self.ultimo_seq = -1
+        self.finalizado = False
 
-class GameServer:
-    def __init__(self, port: int, senhaInput: str, ntMax: int):
-        self.port = port
-        self.ntMax = ntMax
-        self.senhaReal = self._generateSenhaReal(senhaInput)
-        self.na = len(self.senhaReal)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.estadoClientes = {}
-        self.clientesAtendidos = 0
+class ServidorJogo:
+    def __init__(self, porta: int, senha_entrada: str, max_tentativas: int):
+        self.porta = porta
+        self.max_tentativas = max_tentativas
+        self.senha_real = self._gerar_senha_real(senha_entrada)
+        self.num_digitos = len(self.senha_real)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.estado_clientes = {}
+        self.clientes_atendidos = 0
 
     # Define a senha do jogo ou gera uma aleatória caso receba uma sequência de zeros
-    def _generateSenhaReal(self, senhaInput: str) -> str:
-        if senhaInput.isdigit() and all(c == '0' for c in senhaInput) and 4 <= len(senhaInput) <= 8:
-            length = len(senhaInput)
-            digits = list("0123456789")
-            random.shuffle(digits)
-            return "".join(digits[:length])
-        return senhaInput
+    def _gerar_senha_real(self, senha_entrada: str) -> str:
+        if senha_entrada.isdigit() and all(c == '0' for c in senha_entrada) and 4 <= len(senha_entrada) <= 8:
+            comprimento = len(senha_entrada)
+            digitos = list("0123456789")
+            random.shuffle(digitos)
+            return "".join(digitos[:comprimento])
+        return senha_entrada
 
     # Recupera a sessão ativa do cliente pelo endereço ou cria uma nova se for o primeiro contato
-    def _getOrCreateSession(self, addr) -> ClientSession:
-        if addr not in self.estadoClientes:
-            self.estadoClientes[addr] = ClientSession()
-        return self.estadoClientes[addr]
+    def _obter_ou_criar_sessao(self, endereco) -> ClienteSessao:
+        if endereco not in self.estado_clientes:
+            self.estado_clientes[endereco] = ClienteSessao()
+        return self.estado_clientes[endereco]
 
     # Recalcula e valida o checksum do pacote recebido do cliente
-    def _validateChecksum(self, data: bytes, cksumRec: int) -> bool:
-        dataRecalc = bytearray(data)
-        dataRecalc[1] = 0
-        return Packet.calculateChecksum(dataRecalc) == cksumRec
+    def _validar_checksum(self, dados: bytes, checksum_recebido: int) -> bool:
+        dados_recalculados = bytearray(dados)
+        dados_recalculados[1] = 0
+        return Packet.calculateChecksum(dados_recalculados) == checksum_recebido
 
     # Valida as regras do palpite enviado e gera a string de feedback (*, +, -)
-    def _processTry(self, data: bytes, seqnum: int, ctx: ClientSession) -> str:
-        payloadInts = list(data[4:4 + self.na])
-        payloadStr = "".join(str(x) for x in payloadInts)
-
-        if (len(set(payloadInts)) != self.na
-                or any(x > 9 for x in payloadInts)
-                or seqnum != ctx.tryCount + 1):
+    def _processar_tentativa(self, dados: bytes, num_seq: int, contexto: ClienteSessao) -> str:
+        if len(dados) < 4 + self.num_digitos:
             return None
 
-        ctx.tryCount = seqnum
+        payload_inteiros = list(dados[4:4 + self.num_digitos])
+        payload_str = "".join(str(x) for x in payload_inteiros)
+
+        seq_esperado = contexto.tentativas + 1
+        if num_seq != seq_esperado:
+            return None
+
+        if (len(set(payload_inteiros)) != self.num_digitos
+                or any(x > 9 for x in payload_inteiros)):
+            return None
+
+        contexto.tentativas = num_seq
+
         feedback = ""
-        for i in range(self.na):
-            if payloadStr[i] == self.senhaReal[i]:
+        for i in range(self.num_digitos):
+            if payload_str[i] == self.senha_real[i]:
                 feedback += "*"
-            elif payloadStr[i] in self.senhaReal:
+            elif payload_str[i] in self.senha_real:
                 feedback += "+"
             else:
                 feedback += "-"
         return feedback
 
     # Inicializa o socket e executa o loop principal de recebimento e tratamento de pacotes
-    def start(self):
-        self.sock.bind(('0.0.0.0', self.port))
+    def iniciar(self):
+        self.socket.bind(('0.0.0.0', self.porta))
+        self.socket.settimeout(0.1)
 
-        while self.clientesAtendidos < 2:
-            data, addr = self.sock.recvfrom(1024)
-
-            if len(data) < 4:
+        while self.clientes_atendidos < 2:
+            try:
+                dados, endereco = self.socket.recvfrom(1024)
+            except socket.timeout:
                 continue
 
-            tipo, cksumRec, seqnum = Packet.unpackHeader(data)
-
-            if not self._validateChecksum(data, cksumRec):
+            if len(dados) < 4:
                 continue
 
-            ctx = self._getOrCreateSession(addr)
+            tipo, checksum_recebido, num_seq = Packet.unpackHeader(dados)
+
+            if not self._validar_checksum(dados, checksum_recebido):
+                continue
+
+            contexto = self._obter_ou_criar_sessao(endereco)
 
             if tipo == Packet.TIPO_START:
-                resPayload = "?" * self.na
-                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax, resPayload)
-                self.sock.sendto(ctx.lastRes, addr)
+                payload_resposta = "?" * self.num_digitos
+                contexto.ultima_resposta = Packet.build(Packet.TIPO_RESPONSE, self.max_tentativas, payload_resposta)
+                self.socket.sendto(contexto.ultima_resposta, endereco)
 
             elif tipo == Packet.TIPO_TRY:
-                feedback = self._processTry(data, seqnum, ctx)
+                feedback = self._processar_tentativa(dados, num_seq, contexto)
                 if feedback is None:
-                    errPkt = Packet.build(Packet.TIPO_ERROR, 1 if seqnum <= self.ntMax else 0, "")
-                    self.sock.sendto(errPkt, addr)
+                    pacote_erro = Packet.build(Packet.TIPO_ERROR, 1 if num_seq <= self.max_tentativas else 0, "")
+                    self.socket.sendto(pacote_erro, endereco)
                     continue
 
-                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, self.ntMax - seqnum, feedback)
-                self.sock.sendto(ctx.lastRes, addr)
+                contexto.ultima_resposta = Packet.build(Packet.TIPO_RESPONSE, self.max_tentativas - num_seq, feedback)
+                self.socket.sendto(contexto.ultima_resposta, endereco)
+
+                if feedback == "*" * self.num_digitos and not contexto.finalizado:
+                    contexto.finalizado = True
+                    self.clientes_atendidos += 1
 
             elif tipo == Packet.TIPO_GIVE_UP:
-                ctx.lastRes = Packet.build(Packet.TIPO_RESPONSE, 65535, self.senhaReal)
-                self.sock.sendto(ctx.lastRes, addr)
-                if not ctx.finished:
-                    ctx.finished = True
-                    self.clientesAtendidos += 1
+                contexto.ultima_resposta = Packet.build(Packet.TIPO_RESPONSE, 65535, self.senha_real)
+                self.socket.sendto(contexto.ultima_resposta, endereco)
+                if not contexto.finalizado:
+                    contexto.finalizado = True
+                    self.clientes_atendidos += 1
 
             elif tipo in (Packet.TIPO_RESPONSE, Packet.TIPO_ERROR):
-                errPkt = Packet.build(Packet.TIPO_ERROR, 0, "")
-                self.sock.sendto(errPkt, addr)
+                pacote_erro = Packet.build(Packet.TIPO_ERROR, 0, "")
+                self.socket.sendto(pacote_erro, endereco)
 
 def main():
     if len(sys.argv) != 4:
         sys.exit(1)
 
-    port = int(sys.argv[1])
-    senhaInput = sys.argv[2]
-    ntMax = int(sys.argv[3])
+    porta = int(sys.argv[1])
+    senha_entrada = sys.argv[2]
+    max_tentativas = int(sys.argv[3])
 
-    server = GameServer(port, senhaInput, ntMax)
-    server.start()
+    servidor = ServidorJogo(porta, senha_entrada, max_tentativas)
+    servidor.iniciar()
 
 if __name__ == "__main__":
     main()

@@ -12,30 +12,30 @@ class Packet:
 
     # Calcula o checksum dos bytes do pacote utilizando a operação lógica XOR
     @staticmethod
-    def calculateChecksum(data: bytes) -> int:
+    def calcular_checksum(dados: bytes) -> int:
         checksum = 0
-        for b in data:
-            checksum ^= b
+        for byte in dados:
+            checksum ^= byte
         return checksum
 
     # Constrói o pacote final em bytes empacotando o tipo, sequência, checksum e tratando o payload
     @classmethod
-    def build(cls, tipo: int, seqnum: int, payloadData) -> bytes:
+    def construir(cls, tipo: int, num_seq: int, dados_payload) -> bytes:
         if tipo == cls.TIPO_TRY:
-            if isinstance(payloadData, str):
-                ints = [int(c) for c in payloadData if c.isdigit()]
+            if isinstance(dados_payload, str):
+                inteiros = [int(c) for c in dados_payload if c.isdigit()]
             else:
-                ints = list(payloadData)
-            payload = bytes(ints).ljust(8, b'\x00')
+                inteiros = list(dados_payload)
+            payload = bytes(inteiros).ljust(8, b'\x00')
         else:
-            payload = payloadData.ljust(8).encode('ascii')[:8]
+            payload = dados_payload.ljust(8).encode('ascii')[:8]
 
-        headerTemp = struct.pack('!BBH', tipo, 0, seqnum)
-        cksum = cls.calculateChecksum(headerTemp + payload)
+        cabecalho_temp = struct.pack('!BBH', tipo, 0, num_seq)
+        checksum = cls.calcular_checksum(cabecalho_temp + payload)
 
-        return struct.pack('!BBH', tipo, cksum, seqnum) + payload
+        return struct.pack('!BBH', tipo, checksum, num_seq) + payload
 
     # Desempacota os 4 bytes iniciais do pacote extraindo o tipo, checksum e número de sequência
     @classmethod
-    def unpackHeader(cls, data: bytes):
-        return struct.unpack('!BBH', data[:4])
+    def desempacotar_cabecalho(cls, dados: bytes):
+        return struct.unpack('!BBH', dados[:4])
