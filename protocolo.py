@@ -12,6 +12,10 @@ class Packet:
     MAX_TENTATIVAS_ENVIO = 3
     TIMEOUT_SEGUNDOS = 1.0
 
+    _TAMANHO_MAX_PAYLOAD = 8
+    _CABECALHO_FORMATO = '!BBH'
+    _CABECALHO_TAMANHO = 4
+
     @staticmethod
     def calcular_checksum(dados: bytes) -> int:
         checksum = 0
@@ -21,25 +25,24 @@ class Packet:
 
     @classmethod
     def build(cls, tipo: int, num_seq: int, payload: bytes = b'') -> bytes:
-        if len(payload) > 8:
-            payload = payload[:8]
+        if len(payload) > cls._TAMANHO_MAX_PAYLOAD:
+            payload = payload[:cls._TAMANHO_MAX_PAYLOAD]
 
-        cabecalho_temp = struct.pack('!BBH', tipo, 0, num_seq)
-
+        cabecalho_temp = struct.pack(cls._CABECALHO_FORMATO, tipo, 0, num_seq)
         dados_completos = cabecalho_temp + payload
         checksum = cls.calcular_checksum(dados_completos)
 
-        return struct.pack('!BBH', tipo, checksum, num_seq) + payload
+        return struct.pack(cls._CABECALHO_FORMATO, tipo, checksum, num_seq) + payload
 
     @classmethod
     def unpack_header(cls, dados: bytes):
-        if len(dados) < 4:
+        if len(dados) < cls._CABECALHO_TAMANHO:
             return None, None, None
-        return struct.unpack('!BBH', dados[:4])
+        return struct.unpack(cls._CABECALHO_FORMATO, dados[:cls._CABECALHO_TAMANHO])
 
     @classmethod
     def validar_checksum(cls, dados: bytes) -> bool:
-        if len(dados) < 4:
+        if len(dados) < cls._CABECALHO_TAMANHO:
             return False
 
         _, checksum_recebido, _ = cls.unpack_header(dados)

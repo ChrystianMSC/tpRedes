@@ -5,6 +5,8 @@ import sys
 from protocolo import Packet
 
 class ClienteJogo:
+    _TAMANHO_PAYLOAD = 8
+
     def __init__(self, host: str, porta: int):
         self.tentativas_feitas = None
         self.max_tentativas = None
@@ -20,16 +22,13 @@ class ClienteJogo:
     def _enviar_e_esperar(self, tipo: int, num_seq: int, payload: bytes = b'') -> tuple:
         pacote = Packet.build(tipo, num_seq, payload)
 
-        for tentativa in range(Packet.MAX_TENTATIVAS_ENVIO):
+        for _ in range(Packet.MAX_TENTATIVAS_ENVIO):
             self.socket.sendto(pacote, self.endereco)
 
             try:
                 dados, _ = self.socket.recvfrom(1024)
 
-                if len(dados) < 4:
-                    continue
-
-                if not Packet.validar_checksum(dados):
+                if len(dados) < 4 or not Packet.validar_checksum(dados):
                     continue
 
                 tipo_resp, _, seq_resp = Packet.unpack_header(dados)
@@ -62,44 +61,49 @@ class ClienteJogo:
 
         return na, nt
 
+    def _processar_palpite(self, linha: str) -> bool:
+        palpite = linha.strip()
+        if not palpite:
+            return False
+
+        if palpite.upper() == 'BYE':
+            return False
+
+        if len(palpite) != self.num_digitos:
+            return False
+
+        payload = palpite.encode('ascii')
+        if len(payload) < self._TAMANHO_PAYLOAD:
+            payload = payload.ljust(self._TAMANHO_PAYLOAD, b' ')
+
+        tipo_resp, seq_resp, payload_resp = self._enviar_e_esperar(
+            Packet.TIPO_TRY, self.num_tentativa, payload
+        )
+
+        if tipo_resp == Packet.TIPO_RES:
+            feedback = payload_resp.decode('ascii').rstrip()
+            print(f"{self.num_tentativa}({seq_resp}) {feedback}")
+            self.num_tentativa += 1
+            self.tentativas_feitas += 1
+
+            if feedback == '*' * self.num_digitos:
+                self._enviar_bye()
+                return True
+
+        elif tipo_resp == Packet.TIPO_ERR:
+            if seq_resp > 0:
+                print(f"RETRY {seq_resp}")
+            else:
+                print("ERRO")
+                sys.exit(0)
+
+        return False
+
     def jogar(self):
         try:
             for linha in sys.stdin:
-                palpite = linha.strip()
-                if not palpite:
-                    continue
-
-                if palpite.upper() == 'BYE':
-                    break
-
-                if len(palpite) != self.num_digitos:
-                    continue
-
-                payload = palpite.encode('ascii')
-                if len(payload) < 8:
-                    payload = payload.ljust(8, b' ')
-
-                tipo_resp, seq_resp, payload_resp = self._enviar_e_esperar(
-                    Packet.TIPO_TRY, self.num_tentativa, payload
-                )
-
-                if tipo_resp == Packet.TIPO_RES:
-                    feedback = payload_resp.decode('ascii').rstrip()
-                    print(f"{self.num_tentativa}({seq_resp}) {feedback}")
-                    self.num_tentativa += 1
-                    self.tentativas_feitas += 1
-
-                    if feedback == '*' * self.num_digitos:
-                        self._enviar_bye()
-                        return
-
-                elif tipo_resp == Packet.TIPO_ERR:
-                    if seq_resp > 0:
-                        print(f"RETRY {seq_resp}")
-                    else:
-                        print("ERRO")
-                        sys.exit(0)
-
+                if self._processar_palpite(linha):
+                    return
         except EOFError:
             pass
 
