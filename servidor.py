@@ -3,6 +3,7 @@
 import socket
 import sys
 import random
+from typing import Union, Optional, Tuple
 from protocolo import Packet
 
 class ServidorJogo:
@@ -34,7 +35,7 @@ class ServidorJogo:
             return ''.join(digitos[:comprimento])
         return senha_entrada
 
-    def _validar_digitos(self, payload: bytes) -> tuple[bool, list | None, str | None]:
+    def _validar_digitos(self, payload: bytes) -> Tuple[bool, Optional[list], Optional[str]]:
         if len(payload) < self.num_digitos:
             return False, None, 'TAMANHO_INVALIDO'
 
@@ -60,7 +61,7 @@ class ServidorJogo:
                 feedback.append('-')
         return ''.join(feedback)
 
-    def _processar_tentativa(self, payload: bytes, num_seq: int, endereco) -> tuple:
+    def _processar_tentativa(self, payload: bytes, num_seq: int, endereco) -> Tuple[Optional[str], Union[str, int]]:
         estado = self.clientes[endereco]
         seq_esperado = estado['tentativas'] + 1
 
