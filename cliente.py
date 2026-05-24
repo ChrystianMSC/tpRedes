@@ -19,7 +19,7 @@ class ClienteJogo:
         self.ultimo_tipo = None
         self.ultimo_seq = None
 
-    def enviar_e_esperar(self, tipo, num_seq, payload):
+    def enviar_e_esperar(self, tipo, num_seq, payload=b''):
         pacote = Packet.build(tipo, num_seq, payload)
 
         for _ in range(Packet.MAX_TENTATIVAS_ENVIO):

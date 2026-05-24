@@ -23,29 +23,32 @@ class Packet:
             checksum ^= byte
         return checksum
 
-    def build(self, tipo, num_seq, payload):
-        if len(payload) > self.TAMANHO_MAX_PAYLOAD:
-            payload = payload[:self.TAMANHO_MAX_PAYLOAD]
+    @classmethod
+    def build(cls, tipo, num_seq, payload):
+        if len(payload) > cls.TAMANHO_MAX_PAYLOAD:
+            payload = payload[:cls.TAMANHO_MAX_PAYLOAD]
 
-        cabecalho_temp = struct.pack(self.CABECALHO_FORMATO, tipo, 0, num_seq)
+        cabecalho_temp = struct.pack(cls.CABECALHO_FORMATO, tipo, 0, num_seq)
         dados_completos = cabecalho_temp + payload
-        checksum = self.calcular_checksum(dados_completos)
+        checksum = cls.calcular_checksum(dados_completos)
 
-        return struct.pack(self.CABECALHO_FORMATO, tipo, checksum, num_seq) + payload
+        return struct.pack(cls.CABECALHO_FORMATO, tipo, checksum, num_seq) + payload
 
-    def unpack_header(self, dados):
-        if len(dados) < self.CABECALHO_TAMANHO:
+    @classmethod
+    def unpack_header(cls, dados):
+        if len(dados) < cls.CABECALHO_TAMANHO:
             return None, None, None
-        return struct.unpack(self.CABECALHO_FORMATO, dados[:self.CABECALHO_TAMANHO])
-
-    def validar_checksum(self, dados):
-        if len(dados) < self.CABECALHO_TAMANHO:
+        return struct.unpack(cls.CABECALHO_FORMATO, dados[:cls.CABECALHO_TAMANHO])
+    
+    @classmethod
+    def validar_checksum(cls, dados):
+        if len(dados) < cls.CABECALHO_TAMANHO:
             return False
 
-        _, checksum_recebido, _ = self.unpack_header(dados)
+        _, checksum_recebido, _ = cls.unpack_header(dados)
 
         copia = bytearray(dados)
         copia[1] = 0
-        checksum_calculado = self.calcular_checksum(bytes(copia))
+        checksum_calculado = cls.calcular_checksum(bytes(copia))
 
         return checksum_calculado == checksum_recebido
