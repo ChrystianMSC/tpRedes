@@ -16,7 +16,7 @@ class ClienteJogo:
     def _validar_checksum(self, dados: bytes, checksum_recebido: int) -> bool:
         copia_dados = bytearray(dados)
         copia_dados[1] = 0
-        return Packet.calculateChecksum(copia_dados) == checksum_recebido
+        return Packet.calcular_checksum(copia_dados) == checksum_recebido
 
     # Envia um pacote UDP e aguarda a resposta com tratamento de timeout e retransmissao
     def enviar_e_aguardar(self, pacote: bytes):
@@ -29,7 +29,7 @@ class ClienteJogo:
                 if len(dados) < 4:
                     continue
 
-                tipo, checksum_rec, seq = Packet.unpackHeader(dados)
+                tipo, checksum_rec, seq = Packet.unpack_header(dados)
 
                 if self._validar_checksum(dados, checksum_rec):
                     payload = dados[4:].decode('ascii').strip()

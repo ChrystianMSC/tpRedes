@@ -41,7 +41,7 @@ class ServidorJogo:
     def _validar_checksum(self, dados: bytes, checksum_recebido: int) -> bool:
         dados_recalculados = bytearray(dados)
         dados_recalculados[1] = 0
-        return Packet.calculateChecksum(dados_recalculados) == checksum_recebido
+        return Packet.calcular_checksum(dados_recalculados) == checksum_recebido
 
     # Valida as regras do palpite enviado e gera a string de feedback (*, +, -)
     def _processar_tentativa(self, dados: bytes, num_seq: int, contexto: ClienteSessao) -> str:
@@ -85,7 +85,7 @@ class ServidorJogo:
             if len(dados) < 4:
                 continue
 
-            tipo, checksum_recebido, num_seq = Packet.unpackHeader(dados)
+            tipo, checksum_recebido, num_seq = Packet.unpack_header(dados)
 
             if not self._validar_checksum(dados, checksum_recebido):
                 continue

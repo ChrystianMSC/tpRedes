@@ -20,7 +20,7 @@ class Packet:
 
     # Constrói o pacote final em bytes empacotando o tipo, sequência, checksum e tratando o payload
     @classmethod
-    def construir(cls, tipo: int, num_seq: int, dados_payload) -> bytes:
+    def build(cls, tipo: int, num_seq: int, dados_payload) -> bytes:
         if tipo == cls.TIPO_TRY:
             if isinstance(dados_payload, str):
                 inteiros = [int(c) for c in dados_payload if c.isdigit()]
@@ -37,5 +37,5 @@ class Packet:
 
     # Desempacota os 4 bytes iniciais do pacote extraindo o tipo, checksum e número de sequência
     @classmethod
-    def desempacotar_cabecalho(cls, dados: bytes):
+    def unpack_header(cls, dados: bytes):
         return struct.unpack('!BBH', dados[:4])
